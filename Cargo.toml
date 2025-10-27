@@ -2,7 +2,8 @@
 resolver = "2" #Use the new feature resolver for better dependency resolution
 
 members = [
-    "to_do/core",
-    "to_do/dal",
-    "to_do/networking/actix_server"
+    "glue",
+    "nanoservices/to_do/core",
+    "nanoservices/to_do/dal",
+    "nanoservices/to_do/networking/actix_server"
 ]

@@ -4,6 +4,13 @@ use std::env;
 use std::fs::{OpenOptions, File};
 use std::io::{Read, Write};
 
+use glue::errors::{
+    NanoServiceError,
+    NanoServiceErrorStatus,
+};
+
+use glue::safe_eject;
+
 /// Gets a file handle for JSON storage.
 ///
 /// Reads the file path from the `JSON_STORE_PATH` environment variable.
@@ -13,15 +20,18 @@ use std::io::{Read, Write};
 /// # Returns
 ///
 /// * `Ok(File)` - Handle to the opened file
-/// * `Err(String)` - Error message if file opening fails
-fn get_handle() -> Result<File, String> {
+/// * `NanoServiceError` - Error message if file opening fails
+fn get_handle() -> Result<File, NanoServiceError> {
     let file_path = env::var("JSON_STORE_PATH").unwrap_or_else(|_| "tasks.json".to_string());
-    let file = OpenOptions::new()
+    let file = safe_eject!(
+       OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
-        .open(&file_path)
-        .map_err(|e| format!("Error opening file: {}", e))?;
+        .open(&file_path),
+        NanoServiceErrorStatus::Unknown,
+        "Error reading JSON file"
+    );
     Ok(file)
 }
 
@@ -35,22 +45,29 @@ fn get_handle() -> Result<File, String> {
 /// * `T` - Type of items to deserialize. Must implement `DeserializeOwned`
 ///
 /// # Returns
-///
 /// * `Ok(HashMap<String, T>)` - Map with all stored items
-/// * `Err(String)` - Error message if reading or JSON parsing fails
+/// * `NanoServiceError` - Error message if reading or JSON parsing fails
 ///
 /// # Examples
 ///
 /// ```
 /// let tasks: HashMap<String, Task> = get_all().unwrap();
 /// ```
-pub fn get_all<T: DeserializeOwned>() -> Result<HashMap<String, T>, String>{
+pub fn get_all<T: DeserializeOwned>() -> Result<HashMap<String, T>, NanoServiceError>{
     let mut file = get_handle()?;
     let mut contents = String::new();
-    file.read_to_string(&mut contents)
-        .map_err(|e| format!("Error reading file: {}", e))?;
-    let tasks: HashMap<String, T> = serde_json::from_str(&contents)
-        .map_err(|e| format!("Error parsing JSON: {}", e))?;
+
+    safe_eject!(
+        file.read_to_string(&mut contents),
+        NanoServiceErrorStatus::Unknown,
+        "Error reading JSON file to get all tasks"
+    );
+
+    let tasks: HashMap<String, T> = safe_eject!(
+        serde_json::from_str(&contents),
+        NanoServiceErrorStatus::Unknown,
+        "Error parsing JSON file"
+    );
     Ok(tasks)
 }
 
@@ -70,7 +87,7 @@ pub fn get_all<T: DeserializeOwned>() -> Result<HashMap<String, T>, String>{
 /// # Returns
 ///
 /// * `Ok(())` - If the operation was successful
-/// * `Err(String)` - Error message if serialization or writing fails
+/// * `NanoServiceError` - Error message if serialization or writing fails
 ///
 /// # Examples
 ///
@@ -79,10 +96,18 @@ pub fn get_all<T: DeserializeOwned>() -> Result<HashMap<String, T>, String>{
 /// tasks.insert("1".to_string(), my_task);
 /// save_all(&tasks).unwrap();
 /// ```
-pub fn save_all<T: Serialize>(tasks: &HashMap<String, T>) -> Result<(), String>{
-    let mut file = get_handle()?;
-    let json = serde_json::to_string_pretty(tasks).map_err(|e| format!("Error serializing JSON: {}", e))?;
-    file.write_all(json.as_bytes()).map_err(|e| format!("Error writing to file: {}", e))?;
+pub fn save_all<T: Serialize>(tasks: &HashMap<String, T>) -> Result<(), NanoServiceError>{
+     let mut file = get_handle()?;
+    let json = safe_eject!(
+        serde_json::to_string_pretty(tasks), 
+        NanoServiceErrorStatus::Unknown,
+        "Error serializing JSON before saving tasks"
+    );
+    safe_eject!(
+        file.write_all(json.as_bytes()), 
+        NanoServiceErrorStatus::Unknown,
+        "Error writing tasks to JSON to file"
+    );
     Ok(())
 }
 
@@ -109,11 +134,16 @@ pub fn save_all<T: Serialize>(tasks: &HashMap<String, T>) -> Result<(), String>{
 /// ```
 /// let task: Task = get_one("123").unwrap();
 /// ```
-pub fn get_one<T: DeserializeOwned + Clone>(id: &str) -> Result<T, String>{
+pub fn get_one<T: DeserializeOwned + Clone>(id: &str) -> Result<T, NanoServiceError>{
     let tasks = get_all::<T>()?;
     match tasks.get(id) {
         Some(t) => Ok(t.clone()),
-        None => Err(format!("Task with id {} not found", id))
+        None => Err(
+            NanoServiceError::new(
+                format!("Task with id {} not found", id), 
+                NanoServiceErrorStatus::Unknown
+            )
+        )
     }
 }
 
@@ -135,7 +165,7 @@ pub fn get_one<T: DeserializeOwned + Clone>(id: &str) -> Result<T, String>{
 /// # Returns
 ///
 /// * `Ok(())` - If the operation was successful
-/// * `Err(String)` - Error message if the operation fails
+/// * `NanoServiceError` - Error message if the operation fails
 ///
 /// # Examples
 ///
@@ -143,7 +173,7 @@ pub fn get_one<T: DeserializeOwned + Clone>(id: &str) -> Result<T, String>{
 /// let task = Task::new("My task");
 /// save_one("123", &task).unwrap();
 /// ```
-pub fn save_one<T>(id: &str, task: &T) -> Result<(), String> where T: Serialize + DeserializeOwned + Clone {
+pub fn save_one<T>(id: &str, task: &T) -> Result<(), NanoServiceError> where T: Serialize + DeserializeOwned + Clone {
     let mut tasks = get_all::<T>().unwrap_or_else(|_| HashMap::new());
     tasks.insert(id.to_string(), task.clone());
     save_all(&tasks)
@@ -173,8 +203,8 @@ pub fn save_one<T>(id: &str, task: &T) -> Result<(), String> where T: Serialize 
 /// ```
 /// delete_one::<Task>("123").unwrap();
 /// ```
-pub fn delete_one<T>(id: &str) -> Result<(), String> where T: Serialize + DeserializeOwned + Clone {
-    let mut tasks = get_all::<T>().unwrap_or_else(|_| HashMap::new());
+pub fn delete_one<T>(id: &str) -> Result<(), NanoServiceError> where T: Serialize + DeserializeOwned + Clone {
+    let mut tasks = get_all::<T>().unwrap_or(HashMap::new());
     tasks.remove(id);
     save_all(&tasks)
 }

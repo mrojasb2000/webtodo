@@ -9,4 +9,4 @@ json-file = ["serde", "serde_json"] # Feature for JSON file storage
 [dependencies]
 serde_json = { version = "1.0.145", optional = true } # For JSON file storage
 serde = { version = "1.0.188", optional = true } # For serialization/deserialization
-
+glue = { path = "../../../glue" } # Shared types and utilities
