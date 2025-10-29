@@ -6,5 +6,9 @@
   "washing": {
     "title": "washing",
     "status": "PENDING"
+  },
+  "writing": {
+    "title": "writing",
+    "status": "PENDING"
   }
 }
