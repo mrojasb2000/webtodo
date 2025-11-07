@@ -3,7 +3,7 @@ pub mod get;
 pub mod delete;
 pub mod update;
 
-use actix_web::web::{ServiceConfig, get, post, delete, scope};
+use actix_web::web::{ServiceConfig, get, post, delete, put, scope};
 
 pub fn basic_actions_factory(app: &mut ServiceConfig) {
     app.service(scope("/api/v1")
@@ -11,5 +11,6 @@ pub fn basic_actions_factory(app: &mut ServiceConfig) {
         .route("get/{name}", get().to(get::get_by_name))
         .route("create", post().to(create::create))
         .route("delete/{name}", delete().to(delete::delete_by_name))
+        .route("update", put().to(update::update))
     );
 }
